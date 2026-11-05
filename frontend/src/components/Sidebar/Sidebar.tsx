@@ -1,30 +1,21 @@
 import { useState } from 'react';
-import { useNavigate, useLocation } from 'react-router';
+import { useNavigate } from 'react-router';
 import {
-  MessageSquare,
   Plus,
-  BarChart3,
-  Settings,
   Search,
   PanelLeftClose,
   PanelLeft,
   Cpu,
-  Rocket,
-  Bot,
   Sun,
   Moon,
   Monitor,
   Loader2,
-  ScrollText,
-  Database,
-  Orbit,
 } from 'lucide-react';
 import { ConversationList } from './ConversationList';
 import { useAppStore } from '../../lib/store';
 
 export function Sidebar() {
   const navigate = useNavigate();
-  const location = useLocation();
   const [searchQuery, setSearchQuery] = useState('');
 
   const sidebarOpen = useAppStore((s) => s.sidebarOpen);
@@ -46,23 +37,12 @@ export function Sidebar() {
   const handleNewChat = () => {
     // Don't create a new chat if the current one is empty
     if (messages.length === 0) {
-      navigate('/');
+      navigate('/chat');
       return;
     }
     createConversation(selectedModel);
-    navigate('/');
+    navigate('/chat');
   };
-
-  const navItems = [
-    { path: '/', icon: MessageSquare, label: 'Chat' },
-    { path: '/orchestrator', icon: Orbit, label: 'Orchestrator' },
-    { path: '/dashboard', icon: BarChart3, label: 'Dashboard' },
-    { path: '/data-sources', icon: Database, label: 'Data Sources' },
-    { path: '/agents', icon: Bot, label: 'Agents' },
-    { path: '/logs', icon: ScrollText, label: 'Logs' },
-    { path: '/settings', icon: Settings, label: 'Settings' },
-    { path: '/get-started', icon: Rocket, label: 'Get Started' },
-  ];
 
   return (
     <>
@@ -192,44 +172,6 @@ export function Sidebar() {
           <div className="flex-1 overflow-y-auto px-2">
             <ConversationList searchQuery={searchQuery} />
           </div>
-
-          {/* Bottom nav */}
-          <nav className="px-2 pb-3 pt-2 flex flex-col gap-0.5" style={{ borderTop: '1px solid var(--color-border)' }}>
-            {navItems.map((item) => {
-              const isActive = location.pathname === item.path;
-              return (
-                <button
-                  key={item.path}
-                  onClick={() => navigate(item.path)}
-                  className="relative flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors w-full text-left cursor-pointer"
-                  style={{
-                    background: isActive ? 'var(--color-accent-subtle)' : 'transparent',
-                    color: isActive ? 'var(--color-text)' : 'var(--color-text-secondary)',
-                    fontWeight: isActive ? 500 : 400,
-                  }}
-                  onMouseEnter={(e) => {
-                    if (!isActive) e.currentTarget.style.background = 'var(--color-bg-secondary)';
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!isActive) e.currentTarget.style.background = 'transparent';
-                  }}
-                >
-                  {isActive && (
-                    <span
-                      aria-hidden="true"
-                      className="absolute left-0 top-1.5 bottom-1.5 w-[2px] rounded-full"
-                      style={{
-                        background: 'var(--color-accent)',
-                        boxShadow: '0 0 8px var(--color-accent-glow)',
-                      }}
-                    />
-                  )}
-                  <item.icon size={16} style={isActive ? { color: 'var(--color-accent)' } : undefined} />
-                  {item.label}
-                </button>
-              );
-            })}
-          </nav>
         </div>
       </aside>
     </>

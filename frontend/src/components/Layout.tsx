@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router';
+import { BarChart3, Bot, Database, MessageSquare, Orbit, Rocket, ScrollText, Settings } from 'lucide-react';
 import { ApprovalBell } from './ApprovalBell';
 import { Sidebar } from './Sidebar/Sidebar';
 import { SystemPulse } from './SystemPulse';
@@ -25,16 +26,17 @@ export function Layout() {
 
   const navigate = useNavigate();
   const location = useLocation();
-  const pageName: Record<string, string> = {
-    '/': 'CONVERSA',
-    '/orchestrator': 'ORQUESTRADOR',
-    '/dashboard': 'VISÃO GERAL',
-    '/data-sources': 'FONTES DE DADOS',
-    '/agents': 'AGENTES',
-    '/logs': 'REGISTROS',
-    '/settings': 'CONFIGURAÇÕES',
-    '/get-started': 'INÍCIO',
-  };
+  const showSidebar = location.pathname === '/chat';
+  const navItems = [
+    { path: '/', icon: Orbit, label: 'Cortex' },
+    { path: '/chat', icon: MessageSquare, label: 'Chat' },
+    { path: '/dashboard', icon: BarChart3, label: 'Visão geral' },
+    { path: '/data-sources', icon: Database, label: 'Fontes' },
+    { path: '/agents', icon: Bot, label: 'Agentes' },
+    { path: '/logs', icon: ScrollText, label: 'Registros' },
+    { path: '/settings', icon: Settings, label: 'Config.' },
+    { path: '/get-started', icon: Rocket, label: 'Início' },
+  ];
 
   return (
     <div className="openjarvis-shell flex flex-col h-full w-full overflow-hidden relative" style={{ paddingTop: '3px' }}>
@@ -43,7 +45,20 @@ export function Layout() {
       <ApprovalBell />
       <header className="oj-global-header">
         <div className="oj-brand-lockup"><span className="oj-brand-signal" /><span>OPEN<span>JARVIS</span></span></div>
-        <span className="oj-page-name">{pageName[location.pathname] ?? 'OPENJARVIS'}</span>
+        <nav className="oj-nav" aria-label="Navegação principal">
+          {navItems.map((item) => (
+            <button
+              key={item.path}
+              onClick={() => navigate(item.path)}
+              className={location.pathname === item.path ? 'active' : ''}
+              aria-current={location.pathname === item.path ? 'page' : undefined}
+              title={item.label}
+            >
+              <item.icon size={14} />
+              <span>{item.label}</span>
+            </button>
+          ))}
+        </nav>
         <span className="oj-global-status"><i /> LOCAL E PRIVADO</span>
       </header>
 
@@ -73,8 +88,8 @@ export function Layout() {
       )}
 
       <div className="flex flex-1 min-h-0 relative z-10">
-        <Sidebar />
-        {sidebarOpen && (
+        {showSidebar && <Sidebar />}
+        {showSidebar && sidebarOpen && (
           <div
             className="fixed inset-0 z-20 bg-black/40 md:hidden"
             onClick={() => useAppStore.getState().setSidebarOpen(false)}

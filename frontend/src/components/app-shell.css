@@ -59,3 +59,14 @@
 .oj-system-panel { position: relative; background: linear-gradient(180deg, rgba(5, 18, 30, .94), rgba(5, 13, 23, .98)) !important; box-shadow: -12px 0 35px rgba(0, 0, 0, .16); }.oj-chat-page { position: relative; background: radial-gradient(ellipse at 50% 0%, rgba(16, 179, 221, .055), transparent 42%); }.oj-chat-toolbar { border-bottom: 1px solid rgba(93, 204, 242, .08); }
 .openjarvis-shell .hud-backdrop { background-image: radial-gradient(circle at 20% 0%, rgba(18, 216, 248, .075), transparent 38%), radial-gradient(circle at 88% 110%, rgba(90, 169, 255, .075), transparent 43%); }.openjarvis-shell .hud-backdrop::before { opacity: .3; background-size: 42px 42px; }.openjarvis-shell input::placeholder { color: #638397; }
 @media (max-width: 720px) { .oj-global-header { padding-left: 58px; padding-right: 55px; }.oj-page-name { margin-left: 10px; padding-left: 10px; }.oj-global-status { display: none; } }
+
+/* Top menu: the single navigation for every page. */
+.oj-nav { display: flex; align-items: center; gap: 2px; margin-left: 26px; padding-left: 18px; border-left: 1px solid rgba(118, 197, 228, .22); overflow-x: auto; scrollbar-width: none; }
+.oj-nav::-webkit-scrollbar { display: none; }
+.oj-nav button { position: relative; display: flex; align-items: center; gap: 7px; height: 34px; padding: 0 12px; border: 0; border-radius: 8px; background: transparent; color: #8fb0c0; font: 600 11px var(--font-hud); letter-spacing: .06em; white-space: nowrap; cursor: pointer; transition: background .14s, color .14s; }
+.oj-nav button:hover { background: rgba(18, 216, 248, .08); color: #d9f6ff; }
+.oj-nav button.active { background: var(--color-accent-subtle); color: #e8fbff; }
+.oj-nav button.active svg { color: var(--color-accent); }
+.oj-nav button.active::after { content: ''; position: absolute; left: 12px; right: 12px; bottom: -9px; height: 2px; border-radius: 2px; background: var(--color-accent); box-shadow: 0 0 10px var(--color-accent-glow); }
+@media (max-width: 1180px) { .oj-nav button span { display: none; } .oj-nav button { padding: 0 10px; } }
+@media (max-width: 720px) { .oj-nav { margin-left: 10px; padding-left: 10px; } }
