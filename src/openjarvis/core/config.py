@@ -1623,6 +1623,8 @@ class OperatorsConfig:
 class SpeechConfig:
     """Speech-to-text settings."""
 
+    voice_mode: str = "local"  # "local" or "gpt_live"
+    live_model: str = "gpt-live-1"
     backend: str = "auto"  # "auto", "faster-whisper", "openai", "deepgram"
     model: str = "base"  # Whisper model size: tiny, base, small, medium, large-v3
     language: str = ""  # Empty = auto-detect
@@ -1636,6 +1638,16 @@ class SpeechConfig:
     tts_backend: str = "kokoro"  # "kokoro", "openai_tts", "cartesia", "elevenlabs"
     voice_id: str = "bm_george"
     voice_speed: float = 1.0
+
+
+@dataclass(slots=True)
+class HybridRoutingConfig:
+    """Explicit policy for experimental local/cloud delegation."""
+
+    mode: str = "local"  # "local", "openai", or "automatic"
+    local_model: str = ""  # Empty uses intelligence.default_model.
+    openai_model: str = ""  # Required before cloud routing can be selected.
+    complexity_threshold: float = 0.55
 
 
 @dataclass(slots=True)
@@ -1792,6 +1804,7 @@ class JarvisConfig:
     a2a: A2AConfig = field(default_factory=A2AConfig)
     operators: OperatorsConfig = field(default_factory=OperatorsConfig)
     speech: SpeechConfig = field(default_factory=SpeechConfig)
+    hybrid_routing: HybridRoutingConfig = field(default_factory=HybridRoutingConfig)
     optimize: OptimizeConfig = field(default_factory=OptimizeConfig)
     agent_manager: AgentManagerConfig = field(default_factory=AgentManagerConfig)
     memory_files: MemoryFilesConfig = field(default_factory=MemoryFilesConfig)
@@ -2122,6 +2135,7 @@ def load_config(path: Optional[Path] = None) -> JarvisConfig:
             "a2a",
             "operators",
             "speech",
+            "hybrid_routing",
             "optimize",
             "agent_manager",
             "digest",

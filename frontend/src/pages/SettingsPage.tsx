@@ -36,6 +36,37 @@ import {
   type MemoryStats,
 } from '../lib/api';
 import { isAutoUpdateDisabled, setAutoUpdateDisabled } from '../components/Desktop/UpdateChecker';
+import { getHybridSettings, saveHybridSettings, type HybridSettings } from '../lib/live-voice';
+
+function HybridVoiceSettings() {
+  const [config, setConfig] = useState<HybridSettings | null>(null);
+  const [message, setMessage] = useState('');
+  useEffect(() => { getHybridSettings().then(setConfig).catch(() => setMessage('Could not load voice routing settings.')); }, []);
+  if (!config) return <p className="text-xs">{message || 'Loading voice routing…'}</p>;
+  const update = (patch: Partial<HybridSettings>) => setConfig({ ...config, ...patch });
+  return <div className="space-y-3 py-3 text-sm">
+    <label className="block">Voice mode{' '}
+      <select value={config.voice_mode} onChange={(e) => update({ voice_mode: e.target.value as HybridSettings['voice_mode'] })}>
+        <option value="local">Local (Whisper + Kokoro)</option>
+        <option value="gpt_live">GPT-Live (audio sent to OpenAI)</option>
+      </select>
+    </label>
+    <label className="block">Delegated reasoning{' '}
+      <select value={config.mode} onChange={(e) => update({ mode: e.target.value as HybridSettings['mode'] })}>
+        <option value="local">Local</option><option value="openai">OpenAI</option><option value="automatic">Automatic</option>
+      </select>
+    </label>
+    <label className="block">Local model{' '}
+      <input value={config.local_model} placeholder={config.default_local_model} onChange={(e) => update({ local_model: e.target.value })} />
+    </label>
+    {config.mode !== 'local' && <label className="block">OpenAI model{' '}
+      <input value={config.openai_model} placeholder="gpt-..." onChange={(e) => update({ openai_model: e.target.value })} />
+    </label>}
+    <p className="text-xs">GPT-Live sessions use the OpenAI API and may incur charges. Changes apply to new sessions.</p>
+    <button type="button" onClick={() => void saveHybridSettings(config).then((saved) => { setConfig(saved); setMessage('Saved.'); window.dispatchEvent(new Event('openjarvis-voice-settings')); }).catch((e: Error) => setMessage(e.message))}>Save voice routing</button>
+    {message && <span className="ml-2 text-xs">{message}</span>}
+  </div>;
+}
 
 const CLOUD_KEY_STATUS_CHANGED = 'openjarvis-cloud-key-status-changed';
 
@@ -838,6 +869,7 @@ export function SettingsPage() {
                 />
               </button>
             </SettingRow>
+            <HybridVoiceSettings />
             <SettingRow label="Voice" description="Backend and voice used for spoken replies">
               <div className="flex items-center gap-2">
                 <span

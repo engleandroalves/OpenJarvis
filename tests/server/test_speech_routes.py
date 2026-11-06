@@ -166,6 +166,112 @@ def test_health_no_backend():
     assert data["available"] is False
 
 
+def test_live_session_disabled_by_default(client, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    response = client.post("/v1/speech/live/session", json={"sdp": "offer"})
+    assert response.status_code == 403
+
+
+def test_live_session_uses_server_key_and_client_delegation(app_with_speech, monkeypatch):
+    import httpx
+
+    app_with_speech.state.config = SimpleNamespace(
+        speech=SimpleNamespace(voice_mode="gpt_live", live_model="gpt-live-1")
+    )
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    response = httpx.Response(
+        201, json={"session": {"id": "live_123"}, "transport": {"sdp": "answer"}},
+        request=httpx.Request("POST", "https://api.openai.com/v1/live/sessions"),
+    )
+    post = AsyncMock(return_value=response)
+    with patch("httpx.AsyncClient.post", post), TestClient(app_with_speech) as client:
+        result = client.post("/v1/speech/live/session", json={"sdp": "offer"})
+    assert result.json() == {"session_id": "live_123", "sdp": "answer"}
+    assert post.await_args.kwargs["headers"]["Authorization"] == "Bearer test-key"
+    assert post.await_args.kwargs["json"]["session"]["delegation"] == {"type": "client"}
+    assert "test-key" not in result.text
+
+
+def test_live_session_requires_key(app_with_speech, monkeypatch):
+    app_with_speech.state.config = SimpleNamespace(speech=SimpleNamespace(voice_mode="gpt_live"))
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    with TestClient(app_with_speech) as client:
+        response = client.post("/v1/speech/live/session", json={"sdp": "offer"})
+    assert response.status_code == 503
+
+
+def test_hybrid_settings_persist_without_losing_other_config(app_with_speech, tmp_path):
+    from openjarvis.core.config import JarvisConfig
+
+    config = JarvisConfig()
+    config._config_path = tmp_path / "config.toml"
+    config._config_path.write_text('[engine]\ndefault = "ollama"\n', encoding="utf-8")
+    app_with_speech.state.config = config
+    with TestClient(app_with_speech) as client:
+        response = client.put("/v1/speech/hybrid/settings", json={
+            "voice_mode": "gpt_live", "mode": "automatic",
+            "local_model": "qwen3:8b", "openai_model": "gpt-test",
+        })
+        assert response.status_code == 200
+        assert client.get("/v1/speech/hybrid/settings").json()["voice_mode"] == "gpt_live"
+    from openjarvis.core.config import tomllib
+
+    with config._config_path.open("rb") as file:
+        saved = tomllib.load(file)
+    assert saved["engine"]["default"] == "ollama"
+    assert saved["hybrid_routing"]["mode"] == "automatic"
+
+
+def test_hybrid_settings_reject_cloud_model_disguised_as_local(app_with_speech, tmp_path):
+    from openjarvis.core.config import JarvisConfig
+
+    config = JarvisConfig()
+    config._config_path = tmp_path / "config.toml"
+    app_with_speech.state.config = config
+    with TestClient(app_with_speech) as client:
+        response = client.put("/v1/speech/hybrid/settings", json={
+            "voice_mode": "gpt_live", "mode": "local", "local_model": "gpt-test",
+        })
+    assert response.status_code == 400
+    assert not config._config_path.exists()
+
+
+def test_live_delegation_uses_local_and_checks_return_boundary(app_with_speech, monkeypatch):
+    from openjarvis.core.config import JarvisConfig
+
+    config = JarvisConfig()
+    config.speech.voice_mode = "gpt_live"
+    config.hybrid_routing.local_model = "qwen3:8b"
+    app_with_speech.state.config = config
+    guard = MagicMock()
+    guard.scan_outbound.return_value = "safe reply"
+    app_with_speech.state.boundary_guard = guard
+
+    async def local_stream(model, messages):
+        assert model == "qwen3:8b"
+        assert messages[0].content == "hello"
+        yield "private reply"
+
+    monkeypatch.setattr("openjarvis.server.cloud_router.stream_local", local_stream)
+    with TestClient(app_with_speech) as client:
+        response = client.post("/v1/speech/live/delegate", json={"text": "hello"})
+    assert response.status_code == 200
+    assert response.json()["text"] == "safe reply"
+    guard.scan_outbound.assert_called_once_with("private reply", "openai:live")
+
+
+def test_live_delegation_fails_closed_without_guard(app_with_speech):
+    from openjarvis.core.config import JarvisConfig
+
+    config = JarvisConfig()
+    config.speech.voice_mode = "gpt_live"
+    config.hybrid_routing.local_model = "qwen3:8b"
+    app_with_speech.state.config = config
+    with TestClient(app_with_speech) as client:
+        response = client.post("/v1/speech/live/delegate", json={"text": "hello"})
+    assert response.status_code == 503
+
+
 # ---------------------------------------------------------------------------
 # Text-to-speech
 # ---------------------------------------------------------------------------

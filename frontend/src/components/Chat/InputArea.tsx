@@ -13,6 +13,7 @@ import {
 import { MicButton } from './MicButton';
 import { useSpeech } from '../../hooks/useSpeech';
 import { useTtsStore } from '../../lib/tts';
+import { getHybridSettings, LiveVoiceSession } from '../../lib/live-voice';
 import type {
   ChatMessage,
   MessageTelemetry,
@@ -89,6 +90,8 @@ function isUsableVoiceTranscript(value: string): boolean {
 export function InputArea() {
   const [input, setInput] = useState('');
   const [voiceSessionEnabled, setVoiceSessionEnabled] = useState(false);
+  const [liveEnabled, setLiveEnabled] = useState(false);
+  const liveRef = useRef<LiveVoiceSession | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -139,7 +142,7 @@ export function InputArea() {
     prevModelRef.current = selectedModel;
   }, [selectedModel, streamState.isStreaming, resetStream]);
 
-  const micDisabled = !speechEnabled || !speechAvailable || streamState.isStreaming || voiceSessionEnabled;
+  const micDisabled = !speechEnabled || !speechAvailable || streamState.isStreaming || voiceSessionEnabled || liveEnabled;
   const micReason: 'not-enabled' | 'no-backend' | 'streaming' | undefined =
     !speechEnabled ? 'not-enabled'
     : !speechAvailable ? 'no-backend'
@@ -639,15 +642,39 @@ export function InputArea() {
     return () => window.clearTimeout(restart);
   }, [voiceSessionEnabled, speechState, streamState.isStreaming, ttsState, startVoiceSessionTurn]);
 
-  useEffect(() => () => cancelRecording(), [cancelRecording]);
+  useEffect(() => () => { cancelRecording(); liveRef.current?.stop(); }, [cancelRecording]);
 
-  const toggleVoiceSession = useCallback(() => {
+  const toggleVoiceSession = useCallback(async () => {
+    if (liveRef.current) {
+      liveRef.current.stop();
+      liveRef.current = null;
+      setLiveEnabled(false);
+      return;
+    }
     if (voiceSessionEnabled) {
       setVoiceSessionEnabled(false);
       cancelRecording();
       return;
     }
-    if (!speechEnabled || !speechAvailable || !selectedModel) {
+    if (!speechEnabled) {
+      toast.error('Enable speech first.');
+      return;
+    }
+    let voiceMode: 'local' | 'gpt_live';
+    try { voiceMode = (await getHybridSettings()).voice_mode; }
+    catch { toast.error('Could not load voice settings.'); return; }
+    if (voiceMode === 'gpt_live') {
+      const session = new LiveVoiceSession((error) => toast.error(error));
+      liveRef.current = session;
+      setLiveEnabled(true);
+      try { await session.start(); }
+      catch (error) {
+        if (liveRef.current === session) { liveRef.current = null; setLiveEnabled(false); }
+        toast.error(error instanceof Error ? error.message : 'Could not start GPT-Live.');
+      }
+      return;
+    }
+    if (!speechAvailable || !selectedModel) {
       toast.error('Enable speech and select a local model first.');
       return;
     }
@@ -684,18 +711,18 @@ export function InputArea() {
           <button
             type="button"
             onClick={toggleVoiceSession}
-            disabled={!voiceSessionEnabled && (!speechEnabled || !speechAvailable || !selectedModel)}
-            aria-pressed={voiceSessionEnabled}
+            disabled={!voiceSessionEnabled && !liveEnabled && !speechEnabled}
+            aria-pressed={voiceSessionEnabled || liveEnabled}
             className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs transition-colors cursor-pointer disabled:cursor-default disabled:opacity-50"
             style={{
-              background: voiceSessionEnabled ? 'var(--color-accent-subtle)' : 'transparent',
-              border: `1px solid ${voiceSessionEnabled ? 'var(--color-accent)' : 'var(--color-border)'}`,
-              color: voiceSessionEnabled ? 'var(--color-accent)' : 'var(--color-text-tertiary)',
+              background: voiceSessionEnabled || liveEnabled ? 'var(--color-accent-subtle)' : 'transparent',
+              border: `1px solid ${voiceSessionEnabled || liveEnabled ? 'var(--color-accent)' : 'var(--color-border)'}`,
+              color: voiceSessionEnabled || liveEnabled ? 'var(--color-accent)' : 'var(--color-text-tertiary)',
             }}
             title={voiceSessionEnabled ? 'Voice session: listening locally' : 'Start local voice session'}
           >
             <Radio size={12} className={voiceSessionEnabled && speechState === 'recording' ? 'animate-pulse' : ''} />
-            {voiceSessionEnabled ? 'Listening' : 'Voice session'}
+            {liveEnabled ? 'GPT-Live' : voiceSessionEnabled ? 'Listening' : 'Voice session'}
           </button>
         </div>
         {deepResearch && corpusSync.syncing && corpusSync.itemsSynced > 0 && (
@@ -764,7 +791,7 @@ export function InputArea() {
       </div>
       <div className="flex items-center justify-center mt-2 text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>
         <span>
-          {voiceSessionEnabled
+          {liveEnabled ? 'GPT-Live is active — audio is sent to OpenAI' : voiceSessionEnabled
             ? 'Listening locally — click Voice session to stop'
             : <><kbd className="font-mono">Enter</kbd> to send &middot; <kbd className="font-mono">Shift+Enter</kbd> for new line</>}
         </span>

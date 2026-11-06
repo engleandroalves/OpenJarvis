@@ -6,6 +6,9 @@ import asyncio
 import inspect
 import json
 import logging
+import os
+import tempfile
+import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -38,6 +41,21 @@ class SpeechSynthesizeRequest(BaseModel):
     text: str
     voice_id: Optional[str] = None
     speed: Optional[float] = None
+
+
+class LiveSessionRequest(BaseModel):
+    sdp: str
+
+
+class LiveDelegationRequest(BaseModel):
+    text: str
+
+
+class HybridSettingsRequest(BaseModel):
+    voice_mode: str
+    mode: str
+    local_model: str = ""
+    openai_model: str = ""
 
 
 class MemoryStoreRequest(BaseModel):
@@ -988,6 +1006,169 @@ async def learning_policy(request: Request):
 # ---- Speech routes ----
 
 speech_router = APIRouter(prefix="/v1/speech", tags=["speech"])
+_hybrid_settings_lock = threading.Lock()
+
+
+@speech_router.get("/hybrid/settings")
+def get_hybrid_settings(request: Request):
+    config = request.app.state.config
+    return {
+        "voice_mode": config.speech.voice_mode,
+        "mode": config.hybrid_routing.mode,
+        "local_model": config.hybrid_routing.local_model,
+        "openai_model": config.hybrid_routing.openai_model,
+        "default_local_model": config.intelligence.default_model,
+    }
+
+
+@speech_router.put("/hybrid/settings")
+def set_hybrid_settings(request: Request, body: HybridSettingsRequest):
+    import tomlkit
+
+    from openjarvis.core.config import load_config
+    from openjarvis.server.cloud_router import get_provider
+
+    if body.voice_mode not in {"local", "gpt_live"} or body.mode not in {"local", "openai", "automatic"}:
+        raise HTTPException(status_code=400, detail="Invalid voice or routing mode")
+    if any(len(value) > 200 for value in (body.local_model, body.openai_model)):
+        raise HTTPException(status_code=400, detail="Model name is too long")
+    if body.local_model and get_provider(body.local_model) is not None:
+        raise HTTPException(status_code=400, detail="Local model must not be a cloud model")
+    if body.mode in {"openai", "automatic"} and get_provider(body.openai_model) != "openai":
+        raise HTTPException(status_code=400, detail="Select an OpenAI model")
+    config = request.app.state.config
+    with _hybrid_settings_lock:
+        path = config._config_path
+        temporary = None
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            doc = tomlkit.parse(path.read_text(encoding="utf-8")) if path.exists() else tomlkit.document()
+            for section in ("speech", "hybrid_routing"):
+                if section not in doc:
+                    doc.add(section, tomlkit.table())
+            doc["speech"]["voice_mode"] = body.voice_mode
+            doc["hybrid_routing"]["mode"] = body.mode
+            doc["hybrid_routing"]["local_model"] = body.local_model.strip()
+            doc["hybrid_routing"]["openai_model"] = body.openai_model.strip()
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent, delete=False) as handle:
+                temporary = Path(handle.name)
+                handle.write(tomlkit.dumps(doc))
+            temporary.replace(path)
+        except (OSError, ValueError, TypeError) as exc:
+            raise HTTPException(status_code=500, detail="Could not save voice settings") from exc
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+        config.speech.voice_mode = body.voice_mode
+        config.hybrid_routing.mode = body.mode
+        config.hybrid_routing.local_model = body.local_model.strip()
+        config.hybrid_routing.openai_model = body.openai_model.strip()
+        cache_clear = getattr(load_config, "cache_clear", None)
+        if cache_clear is not None:
+            cache_clear()
+    return get_hybrid_settings(request)
+
+
+@speech_router.post("/live/session")
+async def create_live_session(request: Request, body: LiveSessionRequest):
+    """Exchange a WebRTC offer without exposing the OpenAI project key."""
+    import httpx
+
+    config = getattr(request.app.state, "config", None)
+    speech = getattr(config, "speech", None)
+    if getattr(speech, "voice_mode", "local") != "gpt_live":
+        raise HTTPException(status_code=403, detail="GPT-Live is not enabled")
+    sdp = body.sdp.strip()
+    if not sdp or len(sdp) > 100_000:
+        raise HTTPException(status_code=400, detail="Invalid WebRTC offer")
+    from openjarvis.server.cloud_router import _load_keys
+
+    api_key = _load_keys().get("OPENAI_API_KEY", "")
+    if not api_key:
+        raise HTTPException(status_code=503, detail="OpenAI API key is not configured")
+    payload = {
+        "session": {
+            "model": getattr(speech, "live_model", "gpt-live-1"),
+            "instructions": (
+                "You are the voice interface for OpenJarvis. Delegate substantive "
+                "questions and tasks to the application backend. You may handle brief "
+                "conversational acknowledgements directly. Never claim an external "
+                "action was completed unless the backend confirms it."
+            ),
+            "delegation": {"type": "client"},
+        },
+        "transport": {"type": "webrtc", "sdp": sdp},
+    }
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                "https://api.openai.com/v1/live/sessions",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json=payload,
+            )
+        response.raise_for_status()
+        data = response.json()
+        session_id = data["session"]["id"]
+        answer = data["transport"]["sdp"]
+        if not isinstance(session_id, str) or not isinstance(answer, str):
+            raise ValueError("Invalid session response")
+    except (httpx.HTTPError, ValueError, KeyError, TypeError):
+        logger.warning("Could not create GPT-Live session")
+        raise HTTPException(status_code=502, detail="Could not create GPT-Live session") from None
+    return {"session_id": session_id, "sdp": answer}
+
+
+@speech_router.post("/live/delegate")
+async def delegate_live_task(request: Request, body: LiveDelegationRequest):
+    """Run a text-only delegated request and guard its return to GPT-Live."""
+    from openjarvis.core.types import Message, Role
+    from openjarvis.learning.routing.hybrid import select_hybrid_route
+    from openjarvis.security.boundary import SecurityBlockError
+    from openjarvis.server.cloud_router import get_provider, stream_cloud, stream_local
+
+    config = getattr(request.app.state, "config", None)
+    if getattr(getattr(config, "speech", None), "voice_mode", "local") != "gpt_live":
+        raise HTTPException(status_code=403, detail="GPT-Live is not enabled")
+    text = body.text.strip()
+    if not text or len(text) > 12000:
+        raise HTTPException(status_code=400, detail="Invalid delegation text")
+    try:
+        decision = select_hybrid_route(
+            text, config.hybrid_routing,
+            default_local_model=config.intelligence.default_model,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    # A model name must not bypass the policy by being mislabeled as local.
+    provider = get_provider(decision.model)
+    if (decision.provider == "local" and provider is not None) or (
+        decision.provider == "openai" and provider != "openai"
+    ):
+        raise HTTPException(status_code=400, detail="Model does not match configured provider")
+    guard = getattr(request.app.state, "boundary_guard", None)
+    if getattr(getattr(config, "security", None), "enabled", True) and guard is None:
+        raise HTTPException(status_code=503, detail="Outbound security guard is unavailable")
+    try:
+        outbound = guard.scan_outbound(text, "openai") if guard and provider else text
+        messages = [Message(role=Role.USER, content=outbound)]
+        tokens = stream_cloud(decision.model, messages) if provider else stream_local(
+            decision.model, messages
+        )
+        chunks = []
+        async for token in tokens:
+            chunks.append(token)
+        answer = "".join(chunks).strip()
+        if not answer:
+            raise ValueError("Empty response")
+        # GPT-Live receives the result even for local inference.
+        if guard:
+            answer = guard.scan_outbound(answer, "openai:live")
+    except SecurityBlockError:
+        raise HTTPException(status_code=403, detail="Outbound security policy blocked the request") from None
+    except Exception:
+        logger.exception("Live delegation failed")
+        raise HTTPException(status_code=502, detail="Live delegation failed") from None
+    return {"text": answer[:1800], "provider": decision.provider, "model": decision.model}
 
 
 @speech_router.post("/transcribe")
