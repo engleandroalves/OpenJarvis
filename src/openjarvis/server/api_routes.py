@@ -1003,7 +1003,11 @@ async def transcribe_speech(request: Request):
         raise HTTPException(status_code=400, detail="Missing 'file' field")
 
     audio_bytes = await audio_file.read()
-    language = form.get("language")
+    config = getattr(request.app.state, "config", None)
+    speech_config = getattr(config, "speech", None)
+    # An explicit request wins; otherwise respect the configured input
+    # language. An empty setting keeps Whisper's automatic detection.
+    language = form.get("language") or getattr(speech_config, "language", "")
 
     # Detect format from filename
     filename = getattr(audio_file, "filename", "audio.wav")

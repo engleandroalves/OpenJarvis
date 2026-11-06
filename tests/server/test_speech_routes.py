@@ -60,6 +60,29 @@ def test_transcribe_endpoint(client, mock_speech_backend):
     assert data["duration_seconds"] == 1.5
 
 
+def test_transcribe_uses_configured_language(app_with_speech, mock_speech_backend):
+    app_with_speech.state.config = SimpleNamespace(speech=SimpleNamespace(language="en"))
+    with TestClient(app_with_speech) as client:
+        response = client.post(
+            "/v1/speech/transcribe",
+            files={"file": ("test.wav", b"audio", "audio/wav")},
+        )
+    assert response.status_code == 200
+    assert mock_speech_backend.transcribe.call_args.kwargs["language"] == "en"
+
+
+def test_transcribe_explicit_language_overrides_config(app_with_speech, mock_speech_backend):
+    app_with_speech.state.config = SimpleNamespace(speech=SimpleNamespace(language="en"))
+    with TestClient(app_with_speech) as client:
+        response = client.post(
+            "/v1/speech/transcribe",
+            files={"file": ("test.wav", b"audio", "audio/wav")},
+            data={"language": "pt"},
+        )
+    assert response.status_code == 200
+    assert mock_speech_backend.transcribe.call_args.kwargs["language"] == "pt"
+
+
 def test_transcribe_endpoint_offloads_backend_work(client, mock_speech_backend):
     expected = TranscriptionResult(
         text="Offloaded",

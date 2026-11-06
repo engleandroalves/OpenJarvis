@@ -22,6 +22,7 @@ import { StreamingDots } from '../components/Chat/StreamingDots';
 import { fetchAvailableTools, type ToolInfo } from '../lib/api';
 import { fetchVaultGraph, type VaultGraph } from '../lib/vault-api';
 import { useAppStore } from '../lib/store';
+import { useVoiceAutoplay } from '../hooks/useVoiceAutoplay';
 import './cortex.css';
 
 const LEFT_W = 300;
@@ -59,6 +60,7 @@ function useVaultGraph() {
 }
 
 export function CortexPage() {
+  useVoiceAutoplay();
   const navigate = useNavigate();
   const { graph, error, loading, reload } = useVaultGraph();
   const [focus, setFocus] = useState<Focus>(null);

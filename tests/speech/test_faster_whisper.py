@@ -51,6 +51,7 @@ def test_faster_whisper_transcribe():
         assert result.text == "Hello world"
         assert result.language == "en"
         assert result.duration_seconds == 1.5
+        assert mock_model.transcribe.call_args.kwargs["vad_filter"] is True
 
 
 def test_faster_whisper_transcribe_temp_file_reopenable_and_removed():

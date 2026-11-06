@@ -440,3 +440,19 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 
 - [Quick Start](quickstart.md) — Run your first query
 - [Configuration](configuration.md) — Customize engine hosts, model routing, memory, and more
+
+# Windows voice output
+
+On Windows, OpenJarvis can automatically use the speech voices installed in
+Windows for local text-to-speech. No additional Python package or cloud account
+is required. The operating system's default voice is used unless a voice is
+selected in `~/.openjarvis/config.toml`:
+
+```toml
+[speech]
+tts_backend = "windows"
+voice_id = "Microsoft Maria Desktop"
+```
+
+The voice name must match a voice installed on the machine. Other TTS backends,
+including the optional local Kokoro voice package, remain available.

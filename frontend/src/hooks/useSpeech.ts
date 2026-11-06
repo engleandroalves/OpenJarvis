@@ -10,6 +10,7 @@ interface SpeechRecordingOptions {
 }
 
 const VOICE_ACTIVITY_THRESHOLD = 0.018;
+const MIN_SPEECH_ACTIVITY_MS = 350;
 const END_OF_SPEECH_MS = 1_200;
 const STARTUP_SILENCE_MS = 10_000;
 
@@ -162,6 +163,7 @@ export function useSpeech() {
         const startedAt = performance.now();
         let lastSpeechAt = startedAt;
         let heardSpeech = false;
+        let activityStartedAt: number | null = null;
 
         const measure = () => {
           if (mediaRecorderRef.current !== recorder || recorder.state !== 'recording') return;
@@ -175,8 +177,11 @@ export function useSpeech() {
           const rms = Math.sqrt(energy / samples.length);
           const now = performance.now();
           if (rms >= VOICE_ACTIVITY_THRESHOLD) {
-            heardSpeech = true;
+            activityStartedAt ??= now;
+            if (now - activityStartedAt >= MIN_SPEECH_ACTIVITY_MS) heardSpeech = true;
             lastSpeechAt = now;
+          } else {
+            activityStartedAt = null;
           }
 
           if (!heardSpeech && now - startedAt >= STARTUP_SILENCE_MS) {

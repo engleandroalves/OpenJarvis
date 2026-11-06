@@ -116,7 +116,9 @@ class FasterWhisperBackend(SpeechBackend):
                 with tmp:
                     tmp.write(audio)
 
-                kwargs = {}
+                # Filter non-speech audio before Whisper can hallucinate text
+                # from microphone noise or silence.
+                kwargs = {"vad_filter": True}
                 if language:
                     kwargs["language"] = language
 
